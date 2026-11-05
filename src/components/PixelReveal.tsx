@@ -53,6 +53,7 @@ export function PixelReveal({
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  const phase2StartedRef = useRef(false);
 
   const [grid, setGrid] = useState({
     cols: 40,
@@ -106,37 +107,47 @@ export function PixelReveal({
     return () => clearInterval(interval);
   }, [grid.rows, phase1Rows, started]);
 
-  // Phase 2: Apply grayscale strictly one row at a time from bottom (swift ~260ms sweep, starts after Phase 1)
+  // Phase 2: Accelerating batch sweep (1 -> 2 -> 4 rows per frame, capped at 4)
   useEffect(() => {
-    if (phase1Rows < grid.rows || phase2Rows >= grid.rows) return;
+    if (!started || phase1Rows < grid.rows || phase2StartedRef.current) return;
+    phase2StartedRef.current = true;
 
-    const fastStepMs = Math.max(7, Math.min(12, Math.round(260 / Math.max(1, grid.rows))));
-    let intervalId: ReturnType<typeof setInterval> | null = null;
+    let rafId: number | null = null;
     let finishTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
     // 550ms deliberate pause after Phase 1 completes before Phase 2 begins
     const timeoutId = setTimeout(() => {
-      intervalId = setInterval(() => {
-        setPhase2Rows((prev) => {
-          const next = prev + 1;
-          if (next >= grid.rows) {
-            if (intervalId) clearInterval(intervalId);
-            finishTimeoutId = setTimeout(() => {
-              setIsFullySettled(true);
-            }, 200);
-            return grid.rows;
+      let currentBatch = 1;
+      let currentRow = 0;
+
+      const step = () => {
+        currentRow = Math.min(grid.rows, currentRow + currentBatch);
+        setPhase2Rows(currentRow);
+
+        if (currentRow < grid.rows) {
+          // Accelerating progression: 1 row, then 2 rows, then 4 rows (capped at 4)
+          if (currentBatch === 1) {
+            currentBatch = 2;
+          } else if (currentBatch === 2) {
+            currentBatch = 4;
           }
-          return next;
-        });
-      }, fastStepMs);
+          rafId = requestAnimationFrame(step);
+        } else {
+          finishTimeoutId = setTimeout(() => {
+            setIsFullySettled(true);
+          }, 120);
+        }
+      };
+
+      rafId = requestAnimationFrame(step);
     }, 550);
 
     return () => {
       clearTimeout(timeoutId);
       if (finishTimeoutId) clearTimeout(finishTimeoutId);
-      if (intervalId) clearInterval(intervalId);
+      if (rafId) cancelAnimationFrame(rafId);
     };
-  }, [grid.rows, phase1Rows, phase2Rows]);
+  }, [grid.rows, phase1Rows, started]);
 
   // Pointer tracking & autonomous ambient wandering beacon for mobile/idle
   useEffect(() => {
@@ -368,7 +379,7 @@ export function PixelReveal({
                   : "none",
                 animation: cellAnimation,
                 transition: isPhase1
-                  ? "filter 220ms ease, opacity 160ms ease, transform 160ms ease, box-shadow 240ms ease"
+                  ? "filter 120ms ease, opacity 160ms ease, transform 160ms ease, box-shadow 240ms ease"
                   : "opacity 120ms ease, transform 120ms ease",
               }}
             />
