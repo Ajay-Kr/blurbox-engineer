@@ -4,19 +4,19 @@ const MATRIX_COLS = 40;
 const MATRIX_ROWS = 25;
 
 const PIXEL_MATRIX: string[] = [
-  "0000000000000000000111000000000000000000",
-  "0000000000000000000010000000000000000000",
-  "0000000000000000000000000000000000000000",
-  "0000000000000000000000100000000000000000",
-  "0000000000000000000000001001000000000000",
-  "0000000000000000000000000101100000000000",
-  "0000000000000000000000000110000000000000",
-  "0000000000000000000000000100000010000000",
-  "0000000000000000000000000000000000010000",
-  "0000000000000000000000000000000010110000",
-  "0000000000000000000000000000000000000000",
-  "0000000000000000000000000000000000000000",
-  "0000000000000000000000000000000000000000",
+  "0000000000000000000010000000000100001010",
+  "0000000000000000000000100000010001000100",
+  "0000000000000000000000000000100100110001",
+  "0000000000000000000000100001001010101100",
+  "0000000000000000000000010010011011010010",
+  "0000000000000000000001001011001011101101",
+  "0000000000000000000000001100101101110100",
+  "0000000000000000000000100101011011111010",
+  "0000000000000000000000000011010111011101",
+  "0000000000000000000000010101110111110110",
+  "0000000000000000000000010011011110111100",
+  "0000000000000000000000110101111111101101",
+  "0000000000000000000001011110111111011110",
   "0000000000000000000000101000101110010101",
   "0000000000000000010000100011110001011100",
   "0000000000000001000010101101111101101110",
@@ -52,8 +52,10 @@ export function PixelReveal({ src, alt }: { src: string; alt: string }) {
     cellSize: 24,
   });
 
-  const [revealedRows, setRevealedRows] = useState(0);
-  const [settledRows, setSettledRows] = useState(0);
+  const [phase1Rows, setPhase1Rows] = useState(0);
+  const [phase2Rows, setPhase2Rows] = useState(0);
+  const [phase3Rows, setPhase3Rows] = useState(0);
+  const [isFullySettled, setIsFullySettled] = useState(false);
 
   // Compute square cells dynamically according to container dimensions with a max cap
   useEffect(() => {
@@ -79,12 +81,12 @@ export function PixelReveal({ src, alt }: { src: string; alt: string }) {
     return () => observer.disconnect();
   }, []);
 
-  // Wave 1: Reveal strictly one row at a time starting from bottom (slower, observable cadence)
+  // Phase 1: Reveal rows strictly one by one from bottom in full, vibrant color (observable cadence)
   useEffect(() => {
-    if (revealedRows >= grid.rows) return;
+    if (phase1Rows >= grid.rows) return;
     const buildStepMs = Math.max(85, Math.min(130, Math.round(2800 / Math.max(1, grid.rows))));
     const interval = setInterval(() => {
-      setRevealedRows((prev) => {
+      setPhase1Rows((prev) => {
         const next = prev + 1;
         if (next >= grid.rows) {
           clearInterval(interval);
@@ -95,19 +97,19 @@ export function PixelReveal({ src, alt }: { src: string; alt: string }) {
     }, buildStepMs);
 
     return () => clearInterval(interval);
-  }, [grid.rows, revealedRows]);
+  }, [grid.rows, phase1Rows]);
 
-  // Wave 2: Settle strictly one row at a time starting from bottom (faster sweep once all rows rendered)
+  // Phase 2: Apply grayscale strictly one row at a time from bottom (faster sweep, starts after Phase 1)
   useEffect(() => {
-    if (revealedRows < grid.rows || settledRows >= grid.rows) return;
+    if (phase1Rows < grid.rows || phase2Rows >= grid.rows) return;
 
-    const buildStepMs = Math.max(85, Math.min(130, Math.round(2800 / Math.max(1, grid.rows))));
-    const settleStepMs = Math.max(30, Math.round(buildStepMs * 0.4));
-
+    const fastStepMs = Math.max(28, Math.min(48, Math.round(1050 / Math.max(1, grid.rows))));
     let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    // 550ms deliberate pause after Phase 1 completes before Phase 2 begins
     const timeoutId = setTimeout(() => {
       intervalId = setInterval(() => {
-        setSettledRows((prev) => {
+        setPhase2Rows((prev) => {
           const next = prev + 1;
           if (next >= grid.rows) {
             if (intervalId) clearInterval(intervalId);
@@ -115,63 +117,194 @@ export function PixelReveal({ src, alt }: { src: string; alt: string }) {
           }
           return next;
         });
-      }, settleStepMs);
-    }, 200);
+      }, fastStepMs);
+    }, 550);
 
     return () => {
       clearTimeout(timeoutId);
       if (intervalId) clearInterval(intervalId);
     };
-  }, [grid.rows, revealedRows, settledRows]);
+  }, [grid.rows, phase1Rows, phase2Rows]);
 
-  // Pointer tracking in physical pixels for a true geometric circle
+  // Phase 3: Apply blur strictly one row at a time from bottom (swift 0.3s sweep, starts immediately after Phase 2)
+  useEffect(() => {
+    if (phase2Rows < grid.rows || phase3Rows >= grid.rows) return;
+
+    // Completes within 0.3s total (~12ms per row)
+    const blurStepMs = Math.max(8, Math.min(16, Math.round(300 / Math.max(1, grid.rows))));
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    let finishTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    // Starts immediately once Phase 2 completes (no breath pause)
+    intervalId = setInterval(() => {
+      setPhase3Rows((prev) => {
+        const next = prev + 1;
+        if (next >= grid.rows) {
+          if (intervalId) clearInterval(intervalId);
+          finishTimeoutId = setTimeout(() => {
+            setIsFullySettled(true);
+          }, 200);
+          return grid.rows;
+        }
+        return next;
+      });
+    }, blurStepMs);
+
+    return () => {
+      if (finishTimeoutId) clearTimeout(finishTimeoutId);
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [grid.rows, phase2Rows, phase3Rows]);
+
+  // Pointer tracking & autonomous ambient wandering beacon for mobile/idle
   useEffect(() => {
     const el = gridRef.current;
     if (!el) return;
-    const cells = Array.from(el.children) as HTMLElement[];
-    const { cols, cellSize } = grid;
-    const hoverRadius = Math.max(120, cellSize * 5.5);
 
-    let raf = 0;
-    const onMove = (e: PointerEvent) => {
-      cancelAnimationFrame(raf);
-      raf = requestAnimationFrame(() => {
-        const b = el.getBoundingClientRect();
-        if (
-          e.clientX < b.left ||
-          e.clientX > b.right ||
-          e.clientY < b.top ||
-          e.clientY > b.bottom
-        ) {
-          cells.forEach((cell) => cell.style.setProperty("--f", "0"));
-          return;
+    const { cols, rows, cellSize } = grid;
+    const hoverRadius = Math.max(140, cellSize * 6.5);
+    const hoverRadiusSq = hoverRadius * hoverRadius;
+
+    // Cache active cell elements and their physical center coordinates
+    const allCells = Array.from(el.children) as HTMLElement[];
+    const activeCellItems: {
+      el: HTMLElement;
+      cx: number;
+      cy: number;
+      f: number;
+    }[] = [];
+
+    allCells.forEach((cell, i) => {
+      const c = i % cols;
+      const r = Math.floor(i / cols);
+      if (isCellActive(c, r, cols, rows)) {
+        activeCellItems.push({
+          el: cell,
+          cx: (c + 0.5) * cellSize,
+          cy: (r + 0.5) * cellSize,
+          f: 0,
+        });
+      }
+    });
+
+    const gridW = cols * cellSize;
+    const gridH = rows * cellSize;
+    const centerX = gridW * 0.7;
+    const centerY = gridH * 0.62;
+    const spanX = gridW * 0.2;
+    const spanY = gridH * 0.22;
+
+    let fx = centerX;
+    let fy = centerY;
+    let currentIntensity = 0;
+    let isUserActive = false;
+    let userMouseX = centerX;
+    let userMouseY = centerY;
+    let lastUserMoveTime = performance.now();
+    let settledTimestamp = 0;
+    const IDLE_TIMEOUT_MS = 2500;
+    const BEACON_INITIAL_DELAY_MS = 3500;
+
+    let rafId = 0;
+
+    const onPointerMove = (e: PointerEvent) => {
+      const b = el.getBoundingClientRect();
+      if (e.clientX < b.left || e.clientX > b.right || e.clientY < b.top || e.clientY > b.bottom) {
+        isUserActive = false;
+        return;
+      }
+      userMouseX = e.clientX - b.left;
+      userMouseY = e.clientY - b.top;
+      isUserActive = true;
+      lastUserMoveTime = performance.now();
+    };
+
+    const onPointerLeave = () => {
+      isUserActive = false;
+    };
+
+    const animate = (time: number) => {
+      const now = performance.now();
+
+      if (isFullySettled && settledTimestamp === 0) {
+        settledTimestamp = now;
+        lastUserMoveTime = now;
+      }
+
+      const isIdle = !isUserActive || now - lastUserMoveTime > IDLE_TIMEOUT_MS;
+      // Allow grid to rest completely calm for 3.5s after Phase 3 before any ambient beacon drifts
+      const canBeacon =
+        isFullySettled && settledTimestamp > 0 && now - settledTimestamp > BEACON_INITIAL_DELAY_MS;
+
+      let targetX = fx;
+      let targetY = fy;
+      let targetIntensity = 0;
+
+      if (!isIdle) {
+        targetX = userMouseX;
+        targetY = userMouseY;
+        targetIntensity = 1.0;
+        fx += (targetX - fx) * 0.45;
+        fy += (targetY - fy) * 0.45;
+        currentIntensity += (targetIntensity - currentIntensity) * 0.15;
+      } else if (canBeacon) {
+        targetX =
+          centerX + Math.cos(time * 0.0006) * spanX + Math.sin(time * 0.0003) * (spanX * 0.4);
+        targetY =
+          centerY + Math.sin(time * 0.0008) * spanY + Math.cos(time * 0.0005) * (spanY * 0.3);
+        targetIntensity = 0.88;
+        fx += (targetX - fx) * 0.04;
+        fy += (targetY - fy) * 0.04;
+        currentIntensity += (targetIntensity - currentIntensity) * 0.04;
+      } else {
+        targetIntensity = 0;
+        currentIntensity += (targetIntensity - currentIntensity) * 0.1;
+      }
+
+      for (const item of activeCellItems) {
+        const dx = item.cx - fx;
+        const dy = item.cy - fy;
+        const dSq = dx * dx + dy * dy;
+
+        if (dSq > hoverRadiusSq || currentIntensity <= 0.01) {
+          if (item.f > 0) {
+            item.f = 0;
+            item.el.style.setProperty("--f", "0");
+            item.el.style.zIndex = "1";
+          }
+          continue;
         }
 
-        const mouseX = e.clientX - b.left;
-        const mouseY = e.clientY - b.top;
+        const dist = Math.sqrt(dSq);
+        const norm = Math.max(0, 1 - dist / hoverRadius);
+        const newF = Math.pow(norm, 0.75) * currentIntensity;
 
-        cells.forEach((cell, i) => {
-          const c = i % cols;
-          const r = Math.floor(i / cols);
-          const cellCenterX = (c + 0.5) * cellSize;
-          const cellCenterY = (r + 0.5) * cellSize;
+        if (Math.abs(newF - item.f) > 0.015 || (newF === 0 && item.f > 0)) {
+          item.f = newF;
+          item.el.style.setProperty("--f", newF.toFixed(3));
+          item.el.style.zIndex = newF > 0.08 ? "10" : "1";
+        }
+      }
 
-          const dist = Math.hypot(cellCenterX - mouseX, cellCenterY - mouseY);
-          const f = Math.max(0, 1 - dist / hoverRadius);
-          cell.style.setProperty("--f", f.toFixed(3));
-        });
+      rafId = requestAnimationFrame(animate);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerdown", onPointerMove);
+    window.addEventListener("pointerleave", onPointerLeave);
+    rafId = requestAnimationFrame(animate);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerdown", onPointerMove);
+      window.removeEventListener("pointerleave", onPointerLeave);
+      activeCellItems.forEach((item) => {
+        item.el.style.setProperty("--f", "0");
+        item.el.style.zIndex = "1";
       });
     };
-
-    const onLeave = () => cells.forEach((c) => c.style.setProperty("--f", "0"));
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerleave", onLeave);
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerleave", onLeave);
-    };
-  }, [grid]);
+  }, [grid, isFullySettled]);
 
   return (
     <div
@@ -193,8 +326,9 @@ export function PixelReveal({ src, alt }: { src: string; alt: string }) {
           const r = Math.floor(i / grid.cols);
           const active = isCellActive(c, r, grid.cols, grid.rows);
           const rowFromBottom = grid.rows - 1 - r;
-          const isRevealed = rowFromBottom < revealedRows;
-          const isSettled = rowFromBottom < settledRows;
+          const isPhase1 = rowFromBottom < phase1Rows;
+          const isPhase2 = rowFromBottom < phase2Rows;
+          const isPhase3 = rowFromBottom < phase3Rows;
 
           if (!active) {
             return (
@@ -213,27 +347,50 @@ export function PixelReveal({ src, alt }: { src: string; alt: string }) {
           const animDuration = 0.8 + ((i * 37) % 7) * 0.15;
           const animDelay = ((i * 73) % 11) * 0.08;
 
+          let cellAnimation = "none";
+          if (isPhase1 && !isPhase2) {
+            cellAnimation = `pixel-fluctuate ${animDuration.toFixed(2)}s ease-in-out ${animDelay.toFixed(2)}s infinite`;
+          }
+
+          let filterValue = "blur(4px) grayscale(1) brightness(0.78)";
+          if (!isPhase1) {
+            filterValue = "blur(4px) grayscale(1) brightness(0.78)";
+          } else if (!isPhase2) {
+            filterValue = "blur(2.8px) grayscale(1) brightness(0.78)";
+          } else if (!isPhase3) {
+            // Phase 2: Crisp monochrome! Grayscale applied, NOT the blur!
+            filterValue = "blur(0px) grayscale(1) brightness(0.9) contrast(1.05)";
+          } else if (!isFullySettled) {
+            // Phase 3: Both grayscale AND blur applied!
+            filterValue = "blur(2.8px) grayscale(1) brightness(0.78) contrast(0.92)";
+          } else {
+            // Settled: interactive cursor hover & wandering beacon
+            filterValue = `blur(calc((1 - var(--f, 0)) * 2.8px)) grayscale(calc(1 - var(--f, 0))) brightness(calc(0.78 + var(--f, 0) * 0.4)) saturate(calc(1 + var(--f, 0) * 0.5)) contrast(calc(0.92 + var(--f, 0) * 0.16))`;
+          }
+
           return (
             <span
               key={i}
-              className="block"
+              className="block will-change-transform"
               style={{
                 width: `${grid.cellSize}px`,
                 height: `${grid.cellSize}px`,
                 backgroundImage: `url(${src})`,
                 backgroundSize: `${grid.cols * grid.cellSize}px ${grid.rows * grid.cellSize}px`,
                 backgroundPosition: `-${c * grid.cellSize}px -${r * grid.cellSize}px`,
-                opacity: isRevealed ? 1 : 0,
-                filter: isRevealed
-                  ? `blur(calc((1 - var(--f, 0)) * 3px)) grayscale(calc(1 - var(--f, 0)))`
-                  : "blur(6px) grayscale(1)",
-                transform: isRevealed ? "scale(1)" : "scale(0.85)",
-                animation:
-                  isRevealed && !isSettled
-                    ? `pixel-fluctuate ${animDuration.toFixed(2)}s ease-in-out ${animDelay.toFixed(2)}s infinite`
-                    : "none",
-                transition: isSettled
-                  ? "filter 300ms ease"
+                opacity: isPhase1 ? 1 : 0,
+                filter: filterValue,
+                transform: isPhase1
+                  ? isFullySettled
+                    ? "scale(calc(1 + var(--f, 0) * 0.04))"
+                    : "scale(1)"
+                  : "scale(0.85)",
+                boxShadow: isFullySettled
+                  ? "0 0 calc(var(--f, 0) * 12px) rgba(229, 89, 52, calc(var(--f, 0) * 0.22))"
+                  : "none",
+                animation: cellAnimation,
+                transition: isPhase1
+                  ? "filter 220ms ease, opacity 160ms ease, transform 160ms ease, box-shadow 240ms ease"
                   : "opacity 120ms ease, transform 120ms ease",
               }}
             />
