@@ -67,15 +67,7 @@ function Index() {
 
       {/* 01 Hero */}
       <section className="relative isolate min-h-[100svh] overflow-hidden">
-        <div
-          className="absolute inset-0 -z-10"
-          style={{
-            maskImage:
-              "radial-gradient(ellipse 95% 120% at 90% 65%, #000 60%, transparent 100%)",
-            WebkitMaskImage:
-              "radial-gradient(ellipse 95% 120% at 90% 65%, #000 60%, transparent 100%)",
-          }}
-        >
+        <div className="absolute inset-0 -z-10">
           <PixelReveal src={hero} alt="Desk with a sketchbook, origami crane, camera, manga and a laptop showing code" />
         </div>
         <div className="pointer-events-none absolute inset-y-0 left-0 -z-10 w-full bg-gradient-to-r from-background via-background/70 to-transparent lg:w-3/5" />
