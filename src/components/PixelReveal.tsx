@@ -42,7 +42,15 @@ function isCellActive(c: number, r: number, cols: number, rows: number): boolean
 const MIN_CELL_SIZE = 14;
 const MAX_CELL_SIZE = 28;
 
-export function PixelReveal({ src, alt }: { src: string; alt: string }) {
+export function PixelReveal({
+  src,
+  alt,
+  started = true,
+}: {
+  src: string;
+  alt: string;
+  started?: boolean;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
 
@@ -54,7 +62,6 @@ export function PixelReveal({ src, alt }: { src: string; alt: string }) {
 
   const [phase1Rows, setPhase1Rows] = useState(0);
   const [phase2Rows, setPhase2Rows] = useState(0);
-  const [phase3Rows, setPhase3Rows] = useState(0);
   const [isFullySettled, setIsFullySettled] = useState(false);
 
   // Compute square cells dynamically according to container dimensions with a max cap
@@ -83,7 +90,7 @@ export function PixelReveal({ src, alt }: { src: string; alt: string }) {
 
   // Phase 1: Reveal rows strictly one by one from bottom in full, vibrant color (observable cadence)
   useEffect(() => {
-    if (phase1Rows >= grid.rows) return;
+    if (!started || phase1Rows >= grid.rows) return;
     const buildStepMs = Math.max(85, Math.min(130, Math.round(2800 / Math.max(1, grid.rows))));
     const interval = setInterval(() => {
       setPhase1Rows((prev) => {
@@ -97,14 +104,15 @@ export function PixelReveal({ src, alt }: { src: string; alt: string }) {
     }, buildStepMs);
 
     return () => clearInterval(interval);
-  }, [grid.rows, phase1Rows]);
+  }, [grid.rows, phase1Rows, started]);
 
-  // Phase 2: Apply grayscale strictly one row at a time from bottom (faster sweep, starts after Phase 1)
+  // Phase 2: Apply grayscale strictly one row at a time from bottom (swift ~260ms sweep, starts after Phase 1)
   useEffect(() => {
     if (phase1Rows < grid.rows || phase2Rows >= grid.rows) return;
 
-    const fastStepMs = Math.max(28, Math.min(48, Math.round(1050 / Math.max(1, grid.rows))));
+    const fastStepMs = Math.max(7, Math.min(12, Math.round(260 / Math.max(1, grid.rows))));
     let intervalId: ReturnType<typeof setInterval> | null = null;
+    let finishTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
     // 550ms deliberate pause after Phase 1 completes before Phase 2 begins
     const timeoutId = setTimeout(() => {
@@ -113,6 +121,9 @@ export function PixelReveal({ src, alt }: { src: string; alt: string }) {
           const next = prev + 1;
           if (next >= grid.rows) {
             if (intervalId) clearInterval(intervalId);
+            finishTimeoutId = setTimeout(() => {
+              setIsFullySettled(true);
+            }, 200);
             return grid.rows;
           }
           return next;
@@ -122,39 +133,10 @@ export function PixelReveal({ src, alt }: { src: string; alt: string }) {
 
     return () => {
       clearTimeout(timeoutId);
-      if (intervalId) clearInterval(intervalId);
-    };
-  }, [grid.rows, phase1Rows, phase2Rows]);
-
-  // Phase 3: Apply blur strictly one row at a time from bottom (swift 0.3s sweep, starts immediately after Phase 2)
-  useEffect(() => {
-    if (phase2Rows < grid.rows || phase3Rows >= grid.rows) return;
-
-    // Completes within 0.3s total (~12ms per row)
-    const blurStepMs = Math.max(8, Math.min(16, Math.round(300 / Math.max(1, grid.rows))));
-    let intervalId: ReturnType<typeof setInterval> | null = null;
-    let finishTimeoutId: ReturnType<typeof setTimeout> | null = null;
-
-    // Starts immediately once Phase 2 completes (no breath pause)
-    intervalId = setInterval(() => {
-      setPhase3Rows((prev) => {
-        const next = prev + 1;
-        if (next >= grid.rows) {
-          if (intervalId) clearInterval(intervalId);
-          finishTimeoutId = setTimeout(() => {
-            setIsFullySettled(true);
-          }, 200);
-          return grid.rows;
-        }
-        return next;
-      });
-    }, blurStepMs);
-
-    return () => {
       if (finishTimeoutId) clearTimeout(finishTimeoutId);
       if (intervalId) clearInterval(intervalId);
     };
-  }, [grid.rows, phase2Rows, phase3Rows]);
+  }, [grid.rows, phase1Rows, phase2Rows]);
 
   // Pointer tracking & autonomous ambient wandering beacon for mobile/idle
   useEffect(() => {
@@ -328,7 +310,6 @@ export function PixelReveal({ src, alt }: { src: string; alt: string }) {
           const rowFromBottom = grid.rows - 1 - r;
           const isPhase1 = rowFromBottom < phase1Rows;
           const isPhase2 = rowFromBottom < phase2Rows;
-          const isPhase3 = rowFromBottom < phase3Rows;
 
           if (!active) {
             return (
@@ -352,20 +333,17 @@ export function PixelReveal({ src, alt }: { src: string; alt: string }) {
             cellAnimation = `pixel-fluctuate ${animDuration.toFixed(2)}s ease-in-out ${animDelay.toFixed(2)}s infinite`;
           }
 
-          let filterValue = "blur(4px) grayscale(1) brightness(0.78)";
+          let filterValue = "grayscale(1) brightness(0.78)";
           if (!isPhase1) {
-            filterValue = "blur(4px) grayscale(1) brightness(0.78)";
+            filterValue = "grayscale(1) brightness(0.78)";
           } else if (!isPhase2) {
-            filterValue = "blur(2.8px) grayscale(1) brightness(0.78)";
-          } else if (!isPhase3) {
-            // Phase 2: Crisp monochrome! Grayscale applied, NOT the blur!
-            filterValue = "blur(0px) grayscale(1) brightness(0.9) contrast(1.05)";
+            filterValue = "grayscale(1) brightness(0.78)";
           } else if (!isFullySettled) {
-            // Phase 3: Both grayscale AND blur applied!
-            filterValue = "blur(2.8px) grayscale(1) brightness(0.78) contrast(0.92)";
+            // Phase 2: Crisp monochrome! Grayscale applied, no blur!
+            filterValue = "grayscale(1) brightness(0.9) contrast(1.05)";
           } else {
-            // Settled: interactive cursor hover & wandering beacon
-            filterValue = `blur(calc((1 - var(--f, 0)) * 2.8px)) grayscale(calc(1 - var(--f, 0))) brightness(calc(0.78 + var(--f, 0) * 0.4)) saturate(calc(1 + var(--f, 0) * 0.5)) contrast(calc(0.92 + var(--f, 0) * 0.16))`;
+            // Settled: crisp monochrome, cursor hover & wandering beacon reveal vibrant color (no blur)
+            filterValue = `grayscale(calc(1 - var(--f, 0))) brightness(calc(0.9 + var(--f, 0) * 0.35)) saturate(calc(1 + var(--f, 0) * 0.5)) contrast(calc(1.05 + var(--f, 0) * 0.1))`;
           }
 
           return (
